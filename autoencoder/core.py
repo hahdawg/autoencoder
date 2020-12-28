@@ -97,10 +97,19 @@ class AutoEncoder(nn.Module):
         return x_hat
 
 
+def _add_noise(x_tr, noise_factor):
+    if noise_factor > 0:
+        x_tr_in = x_tr + noise_factor*x_tr.std()*torch.randn_like(x_tr)
+        x_tr_target = x_tr
+    else:
+        x_tr_in = x_tr_target = x_tr
+    return x_tr_in, x_tr_target
+
+
 def train_model(
     device="cuda",
-    batch_size=512,
-    num_epochs=100,
+    batch_size=128,
+    num_epochs=250,
     log_interval=250,
     image_dim=28**2,
     code_size=32,
@@ -109,8 +118,8 @@ def train_model(
     encoder_layer_sizes=None,
     decoder_layer_sizes=None
 ):
-    encoder_layer_sizes = encoder_layer_sizes or (image_dim, 256, 128, 64, code_size)
-    decoder_layer_sizes = decoder_layer_sizes or (code_size, 64, 128, 256)
+    encoder_layer_sizes = encoder_layer_sizes or (image_dim, 1024, code_size)
+    decoder_layer_sizes = decoder_layer_sizes or (code_size, 256)
 
     ae = AutoEncoder(
         device=device,
@@ -132,11 +141,7 @@ def train_model(
         for x_tr, _ in bg_train:
             optimizer.zero_grad()
             x_tr = x_tr.to(device)
-            if noise_factor > 0:
-                x_tr_in = x_tr + noise_factor*torch.rand_like(x_tr)
-                x_tr_target = x_tr
-            else:
-                x_tr_in = x_tr_target = x_tr
+            x_tr_in, x_tr_target = _add_noise(x_tr, noise_factor)
             x_tr_hat = ae(x_tr_in)
             loss = loss_fcn(x_tr_target, x_tr_hat).mean()
             loss.backward()
@@ -152,8 +157,9 @@ def train_model(
                         if i >= num_valid_batches:
                             break
                         x_val = x_val.to(device)
-                        x_val_hat = ae(x_val)
-                        loss = loss_fcn(x_val, x_val_hat)
+                        x_val_in, x_val_target = _add_noise(x_val, noise_factor)
+                        x_val_hat = ae(x_val_in)
+                        loss = loss_fcn(x_val_target, x_val_hat)
                         rloss_val.append(loss.item())
 
                     loss_log_tr = np.mean(rloss_tr)
@@ -161,9 +167,10 @@ def train_model(
                     msg = f"epoch: {epoch}   step:  {step}  loss-tr: {loss_log_tr:0.3f}  " + \
                         f"loss-val: {log_loss_val:0.3f}"
                     print(msg)
-                    fig = plt.figure()
-                    ax = fig.add_subplot(111)
-                    ax.imshow(x_val_hat[0].cpu().numpy().reshape(28, 28))
+                    _, ax = plt.subplots(nrows=1, ncols=3)
+                    ax[0].imshow(x_val_target[0].cpu().numpy().reshape(28, 28))
+                    ax[1].imshow(x_val_in[0].cpu().numpy().reshape(28, 28))
+                    ax[2].imshow(x_val_hat[0].cpu().numpy().reshape(28, 28))
                     plt.savefig(join(data_dir, "img.png"))
                     plt.close()
 
@@ -191,8 +198,8 @@ def plot_clusters(code, targets):
     fig = plt.figure()
     ax = fig.add_subplot(111)
     colors = [
-        "red", "darkorange", "lime", "darkgreen", "deepskyblue", "blue",
-        "darkorchid", "plum", "dimgrey", "gold"
+        "red", "darkorange", "lime", "darkgreen", "deepskyblue",
+        "blue", "darkorchid", "plum", "dimgrey", "gold"
     ]
 
     tsne = TSNE()
